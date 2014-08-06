@@ -27,7 +27,7 @@ module Mixlib
     READ_WAIT_TIME = 0.01
     READ_SIZE = 4096
     DEFAULT_READ_TIMEOUT = 600
-    DEFAULT_ENVIRONMENT = {'LC_ALL' => 'C'}
+    DEFAULT_ENVIRONMENT = {'LC_ALL' => 'C.UTF-8'}
 
     if RUBY_PLATFORM =~ /mswin|mingw32|windows/
       require 'mixlib/shellout/windows'
