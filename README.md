@@ -1,7 +1,7 @@
 Test Kitchen - UTF-8 Drivers Fork
 =================================
 
-This is a fork of v1.4.0 of the mixlib-shellout gem. A variety of tools use mixlib-shellout and have their locale coerced to C from UTF-8 when shelling out, causing exceptions when Unicode characters are encounted.
+This is a fork of v1.6.1 of the mixlib-shellout gem. A variety of tools use mixlib-shellout and have their locale coerced to C from UTF-8 when shelling out, causing exceptions when Unicode characters are encounted.
 
 For documentation about test-kitchen, visit https://github.com/opscode/mixlib-shellout
 
