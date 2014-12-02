@@ -115,14 +115,14 @@ module Mixlib
         # If the child dies very quickly, @child_pid may be a zombie, so handle
         # ESRCH here.
         @child_pgid = -Process.getpgid(@child_pid)
-      rescue Errno::ESRCH
+      rescue Errno::ESRCH, Errno::EPERM
         @child_pgid = nil
       end
 
       def set_user
         if user
-          Process.euid = uid
           Process.uid = uid
+          Process.euid = uid
         end
       end
 
@@ -211,31 +211,6 @@ module Mixlib
         STDIN.sync = true if input
       end
 
-      # When a new process is started with chef, it shares the file
-      # descriptors of the parent. We clean the file descriptors
-      # coming from the parent to prevent unintended locking if parent
-      # is killed.
-      # NOTE: After some discussions we've decided to iterate on file
-      # descriptors upto 256. We believe this  is a reasonable upper
-      # limit in a chef environment. If we have issues in the future this
-      # number could be made to be configurable or updated based on
-      # the ulimit based on platform.
-      def clean_parent_file_descriptors
-        # Don't clean $stdin, $stdout, $stderr, process_status_pipe.
-        3.upto(256) do |n|
-          # We are checking the fd for error pipe before attempting to
-          # create a file because error pipe will auto close when we
-          # try to create a file since it's set to CLOEXEC.
-          if n != @process_status_pipe.last.to_i
-            begin
-              fd = File.for_fd(n)
-              fd.close if fd
-            rescue
-            end
-          end
-        end
-      end
-
       def configure_parent_process_file_descriptors
         # Close the sides of the pipes we don't care about
         stdin_pipe.first.close
@@ -278,7 +253,7 @@ module Mixlib
       def read_stdout_to_buffer
         while chunk = child_stdout.read_nonblock(READ_SIZE)
           @stdout << chunk
-          @live_stream << chunk if @live_stream
+          @live_stdout << chunk if @live_stdout
         end
       rescue Errno::EAGAIN
       rescue EOFError
@@ -288,6 +263,7 @@ module Mixlib
       def read_stderr_to_buffer
         while chunk = child_stderr.read_nonblock(READ_SIZE)
           @stderr << chunk
+          @live_stderr << chunk if @live_stderr
         end
       rescue Errno::EAGAIN
       rescue EOFError
@@ -308,8 +284,6 @@ module Mixlib
 
           configure_subprocess_file_descriptors
 
-          clean_parent_file_descriptors
-
           set_group
           set_user
           set_environment
@@ -317,7 +291,7 @@ module Mixlib
           set_cwd
 
           begin
-            command.kind_of?(Array) ? exec(*command) : exec(command)
+            command.kind_of?(Array) ? exec(*command, :close_others=>true) : exec(command, :close_others=>true)
 
             raise 'forty-two' # Should never get here
           rescue Exception => e
@@ -345,12 +319,12 @@ module Mixlib
 
       def reap_errant_child
         return if attempt_reap
-        @terminate_reason = "Command execeded allowed execution time, process terminated"
-        logger.error("Command execeded allowed execution time, sending TERM") if logger
+        @terminate_reason = "Command exceeded allowed execution time, process terminated"
+        logger.error("Command exceeded allowed execution time, sending TERM") if logger
         Process.kill(:TERM, child_pgid)
         sleep 3
         attempt_reap
-        logger.error("Command execeded allowed execution time, sending KILL") if logger
+        logger.error("Command exceeded allowed execution time, sending KILL") if logger
         Process.kill(:KILL, child_pgid)
         reap
 

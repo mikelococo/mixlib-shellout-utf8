@@ -187,8 +187,68 @@ describe Mixlib::ShellOut do
         let(:value) { stream }
         let(:stream) { StringIO.new }
 
-        it "should set the live stream" do
-          should eql(value)
+        before(:each) do
+          shell_cmd.live_stream = stream
+        end
+
+        it "live stream should return the stream used for live stdout and live stderr" do
+          shell_cmd.live_stream.should eql(stream)
+        end
+
+        it "should set the live stdout stream" do
+          shell_cmd.live_stderr.should eql(stream)
+        end
+
+        it "should set the live stderr stream" do
+          shell_cmd.live_stderr.should eql(stream)
+        end
+      end
+
+      context 'when setting the live stdout and live stderr streams separately' do
+        let(:accessor) { :live_stream }
+        let(:stream) { StringIO.new }
+        let(:value) { stream }
+        let(:stdout_stream) { StringIO.new }
+        let(:stderr_stream) { StringIO.new }
+
+        before(:each) do
+          shell_cmd.live_stdout = stdout_stream
+          shell_cmd.live_stderr = stderr_stream
+        end
+
+        it "live_stream should return nil" do
+          shell_cmd.live_stream.should be_nil
+        end
+
+        it "should set the live stdout" do
+          shell_cmd.live_stdout.should eql(stdout_stream)
+        end
+
+        it "should set the live stderr" do
+          shell_cmd.live_stderr.should eql(stderr_stream)
+        end
+      end
+
+      context 'when setting a live stream and then overriding the live stderr' do
+        let(:accessor) { :live_stream }
+        let(:value) { stream }
+        let(:stream) { StringIO.new }
+
+        before(:each) do
+          shell_cmd.live_stdout = stream
+          shell_cmd.live_stderr = nil
+        end
+
+        it "should return nil" do
+          should be_nil
+        end
+
+        it "should set the live stdout" do
+          shell_cmd.live_stdout.should eql(stream)
+        end
+
+        it "should set the live stderr" do
+          shell_cmd.live_stderr.should eql(nil)
         end
       end
 
@@ -449,12 +509,43 @@ describe Mixlib::ShellOut do
 
     context "with a live stream" do
       let(:stream) { StringIO.new }
-      let(:ruby_code) { 'puts "hello"' }
+      let(:ruby_code) { '$stdout.puts "hello"; $stderr.puts "world"' }
       let(:options) { { :live_stream => stream } }
 
       it "should copy the child's stdout to the live stream" do
         shell_cmd.run_command
-        stream.string.should eql("hello#{LINE_ENDING}")
+        stream.string.should include("hello#{LINE_ENDING}")
+      end
+
+      context "with default live stderr" do
+        it "should copy the child's stderr to the live stream" do
+          shell_cmd.run_command
+          stream.string.should include("world#{LINE_ENDING}")
+        end
+      end
+
+      context "without live stderr" do
+        it "should not copy the child's stderr to the live stream" do
+          shell_cmd.live_stderr = nil
+          shell_cmd.run_command
+          stream.string.should_not include("world#{LINE_ENDING}")
+        end
+      end
+
+      context "with a separate live stderr" do
+        let(:stderr_stream) { StringIO.new }
+
+        it "should not copy the child's stderr to the live stream" do
+          shell_cmd.live_stderr = stderr_stream
+          shell_cmd.run_command
+          stream.string.should_not include("world#{LINE_ENDING}")
+        end
+
+        it "should copy the child's stderr to the live stderr stream" do
+          shell_cmd.live_stderr = stderr_stream
+          shell_cmd.run_command
+          stderr_stream.string.should include("world#{LINE_ENDING}")
+        end
       end
     end
 
@@ -797,7 +888,7 @@ describe Mixlib::ShellOut do
         end
       end
 
-      context "when running a command that doesn't exist" do
+      context "when running a command that doesn't exist", :unix_only do
 
         let(:cmd) { "/bin/this-is-not-a-real-command" }
 
@@ -864,7 +955,7 @@ describe Mixlib::ShellOut do
 
       end
 
-      context 'with subprocess that takes longer than timeout' do
+      context 'with subprocess that takes longer than timeout', :unix_only do
         def ruby_wo_shell(code)
           parts = %w[ruby]
           parts << "--disable-gems" if ruby_19?
@@ -922,8 +1013,8 @@ describe Mixlib::ShellOut do
               shell_cmd.stdout.should include("nanana cant hear you")
               shell_cmd.status.termsig.should == 9
 
-              log_output.string.should include("Command execeded allowed execution time, sending TERM")
-              log_output.string.should include("Command execeded allowed execution time, sending KILL")
+              log_output.string.should include("Command exceeded allowed execution time, sending TERM")
+              log_output.string.should include("Command exceeded allowed execution time, sending KILL")
             end
 
           end
@@ -1025,7 +1116,7 @@ describe Mixlib::ShellOut do
         let(:ruby_code) { "STDIN.close; sleep 0.5; STDOUT.puts :win" }
         let(:options) { { :input => "Random data #{rand(100000)}" } }
 
-        it 'should not hang or lose outupt' do
+        it 'should not hang or lose output' do
           stdout.should eql("win#{LINE_ENDING}")
         end
       end
@@ -1033,7 +1124,7 @@ describe Mixlib::ShellOut do
       context 'with subprocess that closes stdout and continues writing to stderr' do
         let(:ruby_code) { "STDOUT.close; sleep 0.5; STDERR.puts :win" }
 
-        it 'should not hang or lose outupt' do
+        it 'should not hang or lose output' do
           stderr.should eql("win#{LINE_ENDING}")
         end
       end
@@ -1041,7 +1132,7 @@ describe Mixlib::ShellOut do
       context 'with subprocess that closes stderr and continues writing to stdout' do
         let(:ruby_code) { "STDERR.close; sleep 0.5; STDOUT.puts :win" }
 
-        it 'should not hang or lose outupt' do
+        it 'should not hang or lose output' do
           stdout.should eql("win#{LINE_ENDING}")
         end
       end
@@ -1227,19 +1318,26 @@ describe Mixlib::ShellOut do
         end
       end
     end
+  end
 
-    describe "#clean_parent_file_descriptors", :unix_only do
-      # test for for_fd returning a valid File object, but close
-      # throwing EBADF.
-      it "should not throw an exception if fd.close throws EBADF" do
-        fd = double('File')
-        fd.stub(:close).at_least(:once).and_raise(Errno::EBADF)
-        File.should_receive(:for_fd).at_least(:once).and_return(fd)
-        shellout = Mixlib::ShellOut.new()
-        shellout.instance_variable_set(:@process_status_pipe, [ 98, 99 ])
-        lambda { shellout.send(:clean_parent_file_descriptors) }.should_not raise_error
+  context "when running under *nix", :requires_root, :unix_only do
+    let(:cmd) { 'whoami' }
+    let(:running_user) { shell_cmd.run_command.stdout.chomp }
+
+    context "when no user is set" do
+      it "should run as current user" do
+        running_user.should eql(ENV["USER"])
       end
     end
 
+    context "when user is specified" do
+      let(:user) { 'nobody' }
+
+      let(:options) { { :user => user } }
+
+      it "should run as specified user" do
+        running_user.should eql("#{user}")
+      end
+    end
   end
 end
